@@ -48,6 +48,23 @@ DeepSeek Flash model. JPEG, PNG, GIF, and WebP inputs are accepted by the
 homework runner.
 
 
-## Homework 1 solution: 
-> to students: please fill your solution description here.
+## Homework 1 solution
+
+### Chain design
+
+```mermaid
+flowchart LR
+    A["Receipt images\n(folder)"] --> B["image_data_url()\nbase64 data URLs"]
+    B --> C["ChatPromptTemplate\nvision extraction prompt"]
+    C --> D["ChatDeepSeek\ndeepseek-v4-flash-vision-exp\ntemperature = 0"]
+    D --> E["chain.batch()\n5 samples per receipt,\nin parallel"]
+    E --> V["median vote per receipt\n(5 samples, robust\nto misreads)"]
+    V --> F["Python aggregation\n(Decimal arithmetic)"]
+    F --> G["Query 1:\nHK$ total paid\n(after ROUNDING)"]
+    F --> H["Query 2:\nHK$ subtotal +\ndiscounts added back"]
+```
+
+### Solution description
+
+My chain has two stages. First, a LangChain `RunnableSequence` (`ChatPromptTemplate | ChatDeepSeek`) reads each receipt image independently and extracts exactly three fields as strict JSON: `final_payment` (the amount actually paid, after the ROUNDING line), `subtotal` (the SUBTOTAL line), and `discounts` (every discount / promotion / coupon line as positive numbers, excluding ROUNDING). The prompt instructs the vision model (`deepseek-v4-flash-vision-exp`) to read every amount digit by digit, double-check against the image, and output only the JSON object, so the model does pure extraction and no arithmetic. Second, `answer_queries` runs the extraction five times per receipt in parallel with `chain.batch` and takes the median of the five samples for each receipt, so occasional misread digits or a skipped discount line cannot swing the total — this keeps results stable across repeated runs. The numbers are then combined deterministically in Python with `Decimal`: Query 1 sums `final_payment` across receipts, Query 2 sums `subtotal + discounts` (discounts added back as positive values, never rounding). Each answer is formatted as a single HKD amount (e.g. `HK$1974.30`) so the response contains exactly one number. The model runs at temperature 0 for stable, repeatable results across runs. Tested end-to-end on `public_test` (7 receipts): both queries match `ground_truth.json`.
 
